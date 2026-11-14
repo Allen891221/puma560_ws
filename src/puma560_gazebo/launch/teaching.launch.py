@@ -51,7 +51,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(ros_gz_sim_pkg, 'launch', 'gz_sim.launch.py')),
         launch_arguments={'gz_args': [
-            '-r -v 2 ', world_file,
+            '-r -v 2 ', LaunchConfiguration('world'),
             ' --render-engine ', LaunchConfiguration('render_engine')]}.items())
 
     # /clock：Gazebo → ROS（use_sim_time 需要）
@@ -104,6 +104,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('rviz', default_value='false', description='是否開啟 RViz2'),
+        DeclareLaunchArgument('world', default_value=world_file,
+                              description='Gazebo world 檔（預設為本套件的 teaching.sdf）'),
         DeclareLaunchArgument('gui', default_value='true', description='是否開啟教學 GUI'),
         DeclareLaunchArgument('show_axes', default_value='true', description='是否畫出各 link 座標軸'),
         DeclareLaunchArgument('joint_limits', default_value='default',

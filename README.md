@@ -1,4 +1,4 @@
-# PUMA560 正向運動學教學模擬（ROS 2 Humble + Gazebo Fortress）
+# PUMA560 正向／反向運動學教學模擬（ROS 2 Humble + Gazebo Fortress）
 
 依照 Craig《Introduction to Robotics》4th ed. **修正式 DH（modified DH）** 建立的 PUMA560 教學輔助教材：
 
@@ -6,6 +6,29 @@
 - PyQt5 GUI：6 個拉桿控制 θ1～θ6，Gazebo 手臂即時跟著動
 - 即時顯示 ⁰₆T（以及 ⁰₁T…⁵₆T、¹₃T、³₆T、¹₆T）
 - 驗證區：tf2 實際查詢 `link_0 → link_6`，與 DH 公式比對
+- 反向運動學：以目前 ⁰₆T 反解全部 8 組閉合解，點選即套用
+
+## 示範
+
+![示範動畫](docs/images/demo.gif)
+
+▶ [觀看完整影片（MP4，1920×720，55 秒）](docs/demo.mp4)
+
+影片內容：拖曳拉桿 → 練習題姿態（⁰₆T 與講義答案一致）→ 切換 ¹₃T、³₆T → 奇異姿態提示 → TCP → 反向運動學 8 組解逐一套用 → 歸零。
+
+### 截圖
+
+| 正向運動學：練習題姿態 (60, −30, 30, 40, 45, −20) | 反向運動學：8 組解 |
+|---|---|
+| ![GUI 正向運動學](docs/images/gui_fk.png) | ![GUI 反向運動學](docs/images/gui_ik.png) |
+
+| 同一個 ⁰₆T：第 1 組解（原姿態） | 同一個 ⁰₆T：第 7 組解（另一種構型） |
+|---|---|
+| ![Gazebo 練習題姿態](docs/images/gazebo_exercise.png) | ![Gazebo IK 第 7 組解](docs/images/gazebo_ik_solution7.png) |
+
+| 奇異姿態 θ5 = 0：GUI 顯示提示 |
+|---|
+| ![GUI 奇異姿態](docs/images/gui_singular.png) |
 
 ---
 
@@ -58,6 +81,7 @@ ros2 launch puma560_gazebo teaching.launch.py rviz:=true
 | `joint_limits` | `default` | `default`＝全部 ±180°；`real`＝PUMA560 實際範圍（**僅供參考**，見下方） |
 | `software_rendering` | `false` | `true`：設定 `LIBGL_ALWAYS_SOFTWARE=1`（虛擬機 / 無 GPU） |
 | `render_engine` | `ogre2` | 軟體渲染時建議改成 `ogre` |
+| `world` | 本套件的 `teaching.sdf` | 改用其他 Gazebo world（例如錄影時加上相機的 world） |
 
 **虛擬機或沒有 GPU 時：**
 
