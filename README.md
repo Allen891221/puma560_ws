@@ -23,7 +23,7 @@ sudo apt install \
   ros-humble-ros2-control ros-humble-ros2-controllers \
   ros-humble-xacro ros-humble-robot-state-publisher \
   ros-humble-joint-state-publisher-gui \
-  python3-numpy python3-pyqt5 python3-yaml python3-pytest
+  python3-numpy python3-scipy python3-pyqt5 python3-yaml python3-pytest
 ```
 
 > **ros2_control 外掛名稱（已查證）**：Humble + Fortress 使用 `ros-humble-gz-ros2-control`（0.7.x）。
@@ -170,7 +170,12 @@ URDF 的 joint 是「先套 `<origin>`（先平移，再依 rpy 旋轉），再�
 ### 5.3 其他設計說明
 
 - **底座架高**：全零姿態時腕心在 {0} 下方 433 mm，所以加了一個固定的 `world → link_0`，把 {0} 架高 1.0 m（xacro 參數 `base_height`）。它只影響 {0} 在世界中的位置，**不影響 ⁰₆T**。
-- **外觀**：只是示意。{4}{5}{6} 三個座標系的原點都在腕心（黃色小球），所以座標軸會重疊；為了方便分辨，三組座標軸的長度不同（{4} 最短，{6} 最長）。
+- **外觀**：仿 PUMA560 的造型與配色（Unimation 米白色機身、深灰色關節與手腕、金屬灰支架）：
+  深色地板法蘭 → 金屬支架 → 機身 → 腰部 → 橫向的肩部圓筒 → 錐形上臂 → 並排（偏移 d3）的前臂 → 手腕 → 工具法蘭。
+  - 上臂與前臂是 mesh，由 `scripts/generate_meshes.py` 在 **colcon build 時依 `dh_params.yaml` 自動產生**（點集合的 3D 凸包），所以長度永遠和 DH 參數一致；產物在 `install/.../meshes/`，不放進 git。
+  - 所有 mesh 都已經放在該 link 的 DH 座標系中，visual 的 origin 為 0；**joint 的 origin 完全沒有改動**，`test_urdf_matches_dh.py` 照樣驗證。
+  - 這仍是「示意」外觀，不是原廠 CAD 尺寸。
+- **座標軸**：{4}{5}{6} 三個座標系的原點都在腕心，所以座標軸會重疊；為了方便分辨，三組座標軸的長度不同（{4} 最短，{6} 最長）。腕心的黃色小球位於手腕外殼內部，在 RViz 中（RobotModel 半透明）比較容易看到。
 - **沒有 collision**：重力已經關閉，而且這套教材只看運動學，所以沒有加入碰撞模型（手臂可以穿過自己）。
 - **關節範圍 `real`（僅供參考）**：θ1 ±160°、θ2 −225°～45°、θ3 −45°～225°、θ4 −110°～170°、θ5 ±100°、θ6 ±266°。這是常見的引用值，**沒有對照原廠手冊查證**，而且不同書的關節零點不一定和 Craig 的座標系相同。若講義有提供數值，請修改 `config/joint_limits.yaml`。
 
@@ -211,6 +216,7 @@ u   = c1·px + s1·py
 │   ├── config/dh_params.yaml       ← 唯一的 DH 參數
 │   ├── config/joint_limits.yaml
 │   ├── urdf/puma560.urdf.xacro     ← DH 巨集自動產生 joint
+│   ├── scripts/generate_meshes.py  ← build 時產生上臂、前臂 mesh
 │   ├── launch/display.launch.py    ← RViz2 + joint_state_publisher_gui
 │   ├── rviz/puma560.rviz
 │   └── test/test_urdf_matches_dh.py

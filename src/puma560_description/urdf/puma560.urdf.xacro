@@ -44,9 +44,11 @@
   <!-- ============================== 材質 ==============================
        注意：Gazebo（sdformat 轉換 URDF）只會正確套用「第一次」引用的全域具名材質，
        所以每個 visual 都用 xacro:mat 巨集直接寫入顏色（RViz 與 Gazebo 都正確）。 -->
+  <!-- 配色仿 PUMA560：Unimation 米白色機身 + 深灰色關節／手腕 + 金屬灰支架與法蘭
+       （Gazebo 轉換時會把顏色約乘上 1.25，所以這裡的數值比實際想要的略暗） -->
   <xacro:property name="colors" value="${dict(
-      body='0.85 0.85 0.82 1', dark='0.25 0.25 0.28 1', joint='0.95 0.55 0.10 1',
-      wrist='1.0 0.85 0.0 1', axis_x='1 0 0 1', axis_y='0 0.8 0 1', axis_z='0 0.2 1 1')}"/>
+      body='0.78 0.74 0.62 1', dark='0.16 0.16 0.18 1', metal='0.52 0.54 0.57 1',
+      wrist='1.0 0.80 0.0 1', axis_x='1 0 0 1', axis_y='0 0.8 0 1', axis_z='0 0.2 1 1')}"/>
   <xacro:macro name="mat" params="name">
     <material name="${name}"><color rgba="${colors[name]}"/></material>
   </xacro:macro>
@@ -65,6 +67,15 @@
     <visual>
       <origin xyz="${x} ${(y0+y1)/2} ${z}" rpy="${-pi/2} 0 0"/>
       <geometry><cylinder radius="${r}" length="${fabs(y1-y0)}"/></geometry>
+      <xacro:mat name="${mat}"/>
+    </visual>
+  </xacro:macro>
+
+  <!-- build 時由 scripts/generate_meshes.py 產生的 mesh，已位於該 link 的 DH 座標系中 -->
+  <xacro:macro name="mesh_visual" params="file mat">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="file://$(find puma560_description)/meshes/${file}"/></geometry>
       <xacro:mat name="${mat}"/>
     </visual>
   </xacro:macro>
@@ -147,69 +158,77 @@
     <origin xyz="0 0 ${base_height}" rpy="0 0 0"/>
   </joint>
 
-  <!-- link_0 = {0}：底座。Z0 朝上，原點在肩部高度 -->
+  <!-- link_0 = {0}：底座。Z0 朝上，原點在肩部高度。
+       由下往上：深色地板法蘭 → 金屬灰支架 → 米白色 PUMA 機身（trunk） -->
   <link name="link_0">
-    <xacro:cyl_z r="0.20" z0="${-base_height}" z1="${-base_height+0.03}" mat="dark"/>
-    <xacro:cyl_z r="0.09" z0="${-base_height+0.03}" z1="-0.12" mat="body"/>
-    <xacro:frame_axes L="0.25" r="0.006"/>
+    <xacro:cyl_z r="0.24" z0="${-base_height}" z1="${-base_height+0.03}" mat="dark"/>
+    <xacro:cyl_z r="0.11" z0="${-base_height+0.03}" z1="-0.40" mat="metal"/>
+    <xacro:cyl_z r="0.150" z0="-0.415" z1="-0.395" mat="dark"/>      <!-- 機身安裝法蘭 -->
+    <xacro:cyl_z r="0.130" z0="-0.395" z1="-0.175" mat="body"/>      <!-- 機身 -->
+    <xacro:frame_axes L="0.30" r="0.006"/>
     <xacro:simple_inertial m="10.0" i="0.5"/>
   </link>
 
-  <!-- link_1 = {1}：腰部（繞 Z1 = Z0 轉）。肩部軸 Z2 = +Y1 -->
+  <!-- link_1 = {1}：腰部（繞 Z1 = Z0 轉）。
+       腰部圓環 + 橫向的大肩部圓筒（沿 Z2 = +Y1），上臂裝在圓筒的 +Y1 側 -->
   <link name="link_1">
-    <xacro:cyl_z r="0.085" z0="-0.12" z1="-0.06" mat="body"/>
-    <xacro:cyl_z r="0.05" z0="-0.06" z1="0.0" mat="body"/>
-    <xacro:cyl_y r="0.075" y0="-0.09" y1="0.06" mat="joint"/>   <!-- 肩關節外殼（沿 Z2） -->
-    <xacro:frame_axes L="0.20" r="0.005"/>
+    <xacro:cyl_z r="0.133" z0="-0.175" z1="-0.165" mat="dark"/>      <!-- 腰部旋轉縫 -->
+    <xacro:cyl_z r="0.125" z0="-0.165" z1="-0.07" mat="body"/>       <!-- 腰部 -->
+    <xacro:cyl_y r="0.120" y0="-0.150" y1="0.012" mat="body"/>       <!-- 肩部圓筒 -->
+    <xacro:cyl_y r="0.075" y0="-0.162" y1="-0.150" mat="dark"/>      <!-- 肩部端蓋 -->
+    <xacro:frame_axes L="0.24" r="0.005"/>
     <xacro:simple_inertial m="5.0" i="0.1"/>
   </link>
 
-  <!-- link_2 = {2}：上臂，沿 X2 方向長 a2；在 Z2 方向偏移 d3 到手肘 -->
+  <!-- link_2 = {2}：上臂（mesh），沿 X2 長 a2，肩端大、肘端小 -->
   <link name="link_2">
-    <xacro:cyl_z r="0.06" z0="0.06" z1="${d3-0.04}" mat="body"/>           <!-- 肩部輪轂 -->
-    <visual>                                                                  <!-- 上臂本體 -->
-      <origin xyz="${a2/2} 0 ${d3-0.08}" rpy="0 0 0"/>
-      <geometry><box size="${a2} 0.09 0.08"/></geometry>
-      <xacro:mat name="body"/>
-    </visual>
-    <xacro:cyl_z r="0.05" x="${a2}" z0="${d3-0.12}" z1="${d3-0.02}" mat="joint"/>  <!-- 手肘輪轂 -->
-    <xacro:frame_axes L="0.15"/>
+    <xacro:mesh_visual file="upper_arm.stl" mat="body"/>
+    <xacro:cyl_z r="0.060" z0="0.0" z1="0.016" mat="dark"/>          <!-- 肩關節軸蓋 -->
+    <xacro:frame_axes L="0.20"/>
     <xacro:simple_inertial m="4.0" i="0.08"/>
   </link>
 
-  <!-- link_3 = {3}：手肘（原點在 {2} 的 [a2, 0, d3]）。
-       前臂：先沿 X3 偏移 a3，再沿 +Y3 長 d4 到腕心（因 α3 = −90°，Z4 = +Y3） -->
+  <!-- link_3 = {3}：前臂（mesh）。原點在 {2} 的 [a2, 0, d3]，與上臂並排（偏移 d3）；
+       先沿 X3 偏移 a3，再沿 +Y3 長 d4 到腕心（α3 = −90° → Z4 = +Y3） -->
   <link name="link_3">
-    <xacro:cyl_z r="0.045" z0="-0.02" z1="0.04" mat="joint"/>
-    <xacro:cyl_y r="0.04" x="${a3}" y0="0.0" y1="${d4-0.07}" mat="body"/>
-    <xacro:frame_axes L="0.12"/>
+    <xacro:mesh_visual file="forearm.stl" mat="body"/>
+    <xacro:cyl_z r="0.045" z0="0.070" z1="0.080" mat="dark"/>        <!-- 肘關節軸蓋 -->
+    <xacro:frame_axes L="0.16"/>
     <xacro:simple_inertial m="2.0" i="0.03"/>
   </link>
 
-  <!-- link_4 = {4}：原點在腕心，Z4 沿前臂方向（前臂位於 −Z4 側） -->
+  <!-- link_4 = {4}：原點在腕心，Z4 沿前臂方向（前臂位於 −Z4 側）。深灰色手腕外殼 -->
   <link name="link_4">
-    <xacro:cyl_z r="0.035" z0="-0.07" z1="-0.03" mat="dark"/>
-    <xacro:frame_axes L="0.08" r="0.003"/>
+    <xacro:cyl_z r="0.043" z0="-0.072" z1="-0.040" mat="dark"/>
+    <xacro:cyl_z r="0.036" z0="-0.040" z1="-0.022" mat="dark"/>
+    <xacro:frame_axes L="0.09" r="0.003"/>
     <xacro:simple_inertial m="0.5" i="0.002"/>
   </link>
 
   <!-- link_5 = {5}：原點在腕心，手腕彎曲軸 Z5 -->
   <link name="link_5">
-    <xacro:cyl_z r="0.03" z0="-0.035" z1="0.035" mat="joint"/>
-    <xacro:frame_axes L="0.11" r="0.003"/>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.034"/></geometry>
+      <xacro:mat name="dark"/>
+    </visual>
+    <xacro:cyl_z r="0.026" z0="-0.046" z1="0.046" mat="dark"/>
+    <xacro:frame_axes L="0.12" r="0.003"/>
     <xacro:simple_inertial m="0.3" i="0.001"/>
   </link>
 
-  <!-- link_6 = {6}：原點在腕心（d6 = 0），Z6 指向法蘭 -->
+  <!-- link_6 = {6}：原點在腕心（d6 = 0），Z6 指向工具法蘭 -->
   <link name="link_6">
-    <visual>  <!-- 黃色小球：腕心（{4}{5}{6} 共同原點） -->
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><sphere radius="0.018"/></geometry>
-      <xacro:mat name="wrist"/>
-    </visual>
-    <xacro:cyl_z r="0.015" z0="0.0" z1="0.05" mat="dark"/>
-    <xacro:cyl_z r="0.032" z0="0.05" z1="0.065" mat="dark"/>   <!-- 小法蘭 -->
-    <xacro:frame_axes L="0.14" r="0.003"/>
+    <xacro:if value="${show_axes}">
+      <visual>  <!-- 黃色小球：腕心（{4}{5}{6} 共同原點），教學輔助，隨 show_axes 開關 -->
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><sphere radius="0.012"/></geometry>
+        <xacro:mat name="wrist"/>
+      </visual>
+    </xacro:if>
+    <xacro:cyl_z r="0.020" z0="0.030" z1="0.052" mat="metal"/>
+    <xacro:cyl_z r="0.032" z0="0.052" z1="0.060" mat="metal"/>       <!-- 工具法蘭 -->
+    <xacro:frame_axes L="0.15" r="0.003"/>
     <xacro:simple_inertial m="0.2" i="0.0005"/>
   </link>
 

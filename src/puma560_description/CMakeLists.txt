@@ -6,6 +6,19 @@ find_package(ament_cmake REQUIRED)
 install(DIRECTORY config urdf launch rviz
   DESTINATION share/${PROJECT_NAME})
 
+# ---- 外觀 mesh：build 時依 dh_params.yaml 自動產生（上臂、前臂），確保尺寸永遠與 DH 一致 ----
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(MESH_DIR ${CMAKE_CURRENT_BINARY_DIR}/meshes)
+set(MESHES ${MESH_DIR}/upper_arm.stl ${MESH_DIR}/forearm.stl)
+add_custom_command(
+  OUTPUT ${MESHES}
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_meshes.py
+          ${CMAKE_CURRENT_SOURCE_DIR}/config/dh_params.yaml ${MESH_DIR}
+  DEPENDS scripts/generate_meshes.py config/dh_params.yaml
+  COMMENT "產生 PUMA560 外觀 mesh")
+add_custom_target(puma560_meshes ALL DEPENDS ${MESHES})
+install(FILES ${MESHES} DESTINATION share/${PROJECT_NAME}/meshes)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_test REQUIRED)
   # 驗證：展開後的 URDF joint 鏈乘積 = Craig DH 的 ⁰₆T
