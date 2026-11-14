@@ -1,0 +1,17 @@
+# ros2_control 控制器設定（gz_ros2_control 會載入此檔）
+controller_manager:
+  ros__parameters:
+    update_rate: 200  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    # position 型 forward_command_controller：
+    #   topic /forward_position_controller/commands（std_msgs/Float64MultiArray，6 個值，rad）
+    forward_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+forward_position_controller:
+  ros__parameters:
+    joints: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6]
+    interface_name: position

@@ -1,0 +1,255 @@
+<?xml version="1.0"?>
+<!--
+  ======================================================================
+  PUMA560 教學模型（Craig 修正式 DH）
+
+  核心原則：每個 link_i 的座標系 ≡ Craig DH 座標系 {i}
+    link_0 = {0}（基座座標系），link_6 = {6}（原點在腕心）
+  因此 TF 上 link_0 → link_6 的轉換 ≡ ⁰₆T。
+
+  所有 joint 都由 dh_params.yaml 經 xacro 巨集「自動產生」，不手算任何數字。
+
+  xacro 參數：
+    show_axes     : true/false  每個 link 是否畫出紅綠藍座標軸
+    joint_limits  : default/real  關節範圍（real 僅供參考，見 joint_limits.yaml）
+    base_height   : {0} 原點離地高度 [m]（只影響 world→link_0，不影響 ⁰₆T）
+    use_gazebo    : true/false  是否加入 ros2_control 與 gz_ros2_control 外掛
+    controllers_file : 控制器 yaml 的絕對路徑（use_gazebo=true 時使用）
+  ======================================================================
+-->
+<robot name="puma560" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="show_axes" default="true"/>
+  <xacro:arg name="joint_limits" default="default"/>
+  <xacro:arg name="base_height" default="1.0"/>
+  <xacro:arg name="use_gazebo" default="false"/>
+  <xacro:arg name="controllers_file" default=""/>
+
+  <xacro:property name="show_axes" value="$(arg show_axes)"/>
+  <xacro:property name="base_height" value="$(arg base_height)"/>
+
+  <!-- 讀取唯一的一份 DH 參數，以及關節範圍 -->
+  <xacro:property name="dh" value="${xacro.load_yaml('$(find puma560_description)/config/dh_params.yaml')}"/>
+  <xacro:property name="limits_all" value="${xacro.load_yaml('$(find puma560_description)/config/joint_limits.yaml')}"/>
+  <xacro:property name="limits" value="${limits_all['$(arg joint_limits)']}"/>
+  <xacro:property name="sym" value="${dh['symbols']}"/>
+  <xacro:property name="rows" value="${dh['dh_table']}"/>
+
+  <!-- 方便外觀使用的尺寸（m），全部從 yaml 取得 -->
+  <xacro:property name="a2" value="${sym['a2']}"/>
+  <xacro:property name="a3" value="${sym['a3']}"/>
+  <xacro:property name="d3" value="${sym['d3']}"/>
+  <xacro:property name="d4" value="${sym['d4']}"/>
+
+  <!-- ============================== 材質 ==============================
+       注意：Gazebo（sdformat 轉換 URDF）只會正確套用「第一次」引用的全域具名材質，
+       所以每個 visual 都用 xacro:mat 巨集直接寫入顏色（RViz 與 Gazebo 都正確）。 -->
+  <xacro:property name="colors" value="${dict(
+      body='0.85 0.85 0.82 1', dark='0.25 0.25 0.28 1', joint='0.95 0.55 0.10 1',
+      wrist='1.0 0.85 0.0 1', axis_x='1 0 0 1', axis_y='0 0.8 0 1', axis_z='0 0.2 1 1')}"/>
+  <xacro:macro name="mat" params="name">
+    <material name="${name}"><color rgba="${colors[name]}"/></material>
+  </xacro:macro>
+
+  <!-- ====================== 小工具巨集：外觀用圓柱 ====================== -->
+  <!-- 沿本座標系 Z 軸的圓柱，z0~z1 為兩端 -->
+  <xacro:macro name="cyl_z" params="r z0 z1 x:=0 y:=0 mat">
+    <visual>
+      <origin xyz="${x} ${y} ${(z0+z1)/2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="${r}" length="${fabs(z1-z0)}"/></geometry>
+      <xacro:mat name="${mat}"/>
+    </visual>
+  </xacro:macro>
+  <!-- 沿本座標系 Y 軸的圓柱，y0~y1 為兩端（RotX(-90°) 把 Z 轉到 +Y） -->
+  <xacro:macro name="cyl_y" params="r y0 y1 x:=0 z:=0 mat">
+    <visual>
+      <origin xyz="${x} ${(y0+y1)/2} ${z}" rpy="${-pi/2} 0 0"/>
+      <geometry><cylinder radius="${r}" length="${fabs(y1-y0)}"/></geometry>
+      <xacro:mat name="${mat}"/>
+    </visual>
+  </xacro:macro>
+
+  <!-- ====================== 座標軸指示（紅 X、綠 Y、藍 Z） ====================== -->
+  <xacro:macro name="frame_axes" params="L:=0.10 r:=0.004">
+    <xacro:if value="${show_axes}">
+      <visual>  <!-- X：圓柱繞 Y 轉 +90°，Z 軸轉到 +X -->
+        <origin xyz="${L/2} 0 0" rpy="0 ${pi/2} 0"/>
+        <geometry><cylinder radius="${r}" length="${L}"/></geometry>
+        <xacro:mat name="axis_x"/>
+      </visual>
+      <visual>  <!-- Y：圓柱繞 X 轉 −90°，Z 軸轉到 +Y -->
+        <origin xyz="0 ${L/2} 0" rpy="${-pi/2} 0 0"/>
+        <geometry><cylinder radius="${r}" length="${L}"/></geometry>
+        <xacro:mat name="axis_y"/>
+      </visual>
+      <visual>  <!-- Z -->
+        <origin xyz="0 0 ${L/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${r}" length="${L}"/></geometry>
+        <xacro:mat name="axis_z"/>
+      </visual>
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- 簡單的慣性（教學用，關閉重力，只是為了讓物理引擎正常） -->
+  <xacro:macro name="simple_inertial" params="m:=1.0 i:=0.01">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${m}"/>
+      <inertia ixx="${i}" ixy="0" ixz="0" iyy="${i}" iyz="0" izz="${i}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ================================================================
+       DH 巨集：由 DH 表第 idx 列產生 joint_idx（link_{idx-1} → link_idx）
+
+       Craig：^{i-1}_i T = RotX(α)·TransX(a)·RotZ(θ)·TransZ(d)
+       因為 RotZ(θ) 與 TransZ(d) 可交換：
+             = RotX(α)·TransX(a)·TransZ(d)·RotZ(θ)
+       而 RotX(α)·TransX(a)·TransZ(d) 這個固定部分等於
+             「先平移 [a, −sα·d, cα·d]，再繞 X 轉 α」
+       正好就是 URDF 的 <origin xyz=... rpy="α 0 0">；
+       URDF 套完 origin 後再繞 <axis xyz="0 0 1"> 轉 θ，即 RotZ(θ)。
+       ================================================================ -->
+  <xacro:macro name="dh_joint" params="idx">
+    <xacro:property name="row" value="${rows[idx-1]}"/>
+    <!-- a、d 可以是數字或符號名稱（例如 a2），在此代換 -->
+    <xacro:property name="a_i" value="${sym[row['a']] if row['a'] in sym else row['a']}"/>
+    <xacro:property name="d_i" value="${sym[row['d']] if row['d'] in sym else row['d']}"/>
+    <xacro:property name="al_i" value="${radians(row['alpha_deg'])}"/>
+    <xacro:property name="lim" value="${limits['joint_' + str(idx)]}"/>
+    <joint name="joint_${idx}" type="revolute">
+      <parent link="link_${idx-1}"/>
+      <child link="link_${idx}"/>
+      <origin xyz="${a_i} ${-sin(al_i)*d_i} ${cos(al_i)*d_i}" rpy="${al_i} 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="${radians(lim[0])}" upper="${radians(lim[1])}" effort="200" velocity="3.0"/>
+      <dynamics damping="0.5" friction="0.0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- 遞迴：依序產生 joint_1 ~ joint_N（N = DH 表列數） -->
+  <xacro:macro name="dh_chain" params="idx:=1">
+    <xacro:if value="${idx &lt;= len(rows)}">
+      <xacro:dh_joint idx="${idx}"/>
+      <xacro:dh_chain idx="${idx+1}"/>
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- =============================== Links ===============================
+       外觀（visual）只是示意，origin 可自由調整；joint 的 origin 由 DH 決定，不可改。
+       以下註解中的方向都是在「該 link 自己的座標系」中描述。 -->
+
+  <link name="world"/>
+  <!-- world → link_0：把 {0} 架高 base_height，避免手臂穿過地板。不影響 ⁰₆T -->
+  <joint name="world_to_base" type="fixed">
+    <parent link="world"/>
+    <child link="link_0"/>
+    <origin xyz="0 0 ${base_height}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- link_0 = {0}：底座。Z0 朝上，原點在肩部高度 -->
+  <link name="link_0">
+    <xacro:cyl_z r="0.20" z0="${-base_height}" z1="${-base_height+0.03}" mat="dark"/>
+    <xacro:cyl_z r="0.09" z0="${-base_height+0.03}" z1="-0.12" mat="body"/>
+    <xacro:frame_axes L="0.25" r="0.006"/>
+    <xacro:simple_inertial m="10.0" i="0.5"/>
+  </link>
+
+  <!-- link_1 = {1}：腰部（繞 Z1 = Z0 轉）。肩部軸 Z2 = +Y1 -->
+  <link name="link_1">
+    <xacro:cyl_z r="0.085" z0="-0.12" z1="-0.06" mat="body"/>
+    <xacro:cyl_z r="0.05" z0="-0.06" z1="0.0" mat="body"/>
+    <xacro:cyl_y r="0.075" y0="-0.09" y1="0.06" mat="joint"/>   <!-- 肩關節外殼（沿 Z2） -->
+    <xacro:frame_axes L="0.20" r="0.005"/>
+    <xacro:simple_inertial m="5.0" i="0.1"/>
+  </link>
+
+  <!-- link_2 = {2}：上臂，沿 X2 方向長 a2；在 Z2 方向偏移 d3 到手肘 -->
+  <link name="link_2">
+    <xacro:cyl_z r="0.06" z0="0.06" z1="${d3-0.04}" mat="body"/>           <!-- 肩部輪轂 -->
+    <visual>                                                                  <!-- 上臂本體 -->
+      <origin xyz="${a2/2} 0 ${d3-0.08}" rpy="0 0 0"/>
+      <geometry><box size="${a2} 0.09 0.08"/></geometry>
+      <xacro:mat name="body"/>
+    </visual>
+    <xacro:cyl_z r="0.05" x="${a2}" z0="${d3-0.12}" z1="${d3-0.02}" mat="joint"/>  <!-- 手肘輪轂 -->
+    <xacro:frame_axes L="0.15"/>
+    <xacro:simple_inertial m="4.0" i="0.08"/>
+  </link>
+
+  <!-- link_3 = {3}：手肘（原點在 {2} 的 [a2, 0, d3]）。
+       前臂：先沿 X3 偏移 a3，再沿 +Y3 長 d4 到腕心（因 α3 = −90°，Z4 = +Y3） -->
+  <link name="link_3">
+    <xacro:cyl_z r="0.045" z0="-0.02" z1="0.04" mat="joint"/>
+    <xacro:cyl_y r="0.04" x="${a3}" y0="0.0" y1="${d4-0.07}" mat="body"/>
+    <xacro:frame_axes L="0.12"/>
+    <xacro:simple_inertial m="2.0" i="0.03"/>
+  </link>
+
+  <!-- link_4 = {4}：原點在腕心，Z4 沿前臂方向（前臂位於 −Z4 側） -->
+  <link name="link_4">
+    <xacro:cyl_z r="0.035" z0="-0.07" z1="-0.03" mat="dark"/>
+    <xacro:frame_axes L="0.08" r="0.003"/>
+    <xacro:simple_inertial m="0.5" i="0.002"/>
+  </link>
+
+  <!-- link_5 = {5}：原點在腕心，手腕彎曲軸 Z5 -->
+  <link name="link_5">
+    <xacro:cyl_z r="0.03" z0="-0.035" z1="0.035" mat="joint"/>
+    <xacro:frame_axes L="0.11" r="0.003"/>
+    <xacro:simple_inertial m="0.3" i="0.001"/>
+  </link>
+
+  <!-- link_6 = {6}：原點在腕心（d6 = 0），Z6 指向法蘭 -->
+  <link name="link_6">
+    <visual>  <!-- 黃色小球：腕心（{4}{5}{6} 共同原點） -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><sphere radius="0.018"/></geometry>
+      <xacro:mat name="wrist"/>
+    </visual>
+    <xacro:cyl_z r="0.015" z0="0.0" z1="0.05" mat="dark"/>
+    <xacro:cyl_z r="0.032" z0="0.05" z1="0.065" mat="dark"/>   <!-- 小法蘭 -->
+    <xacro:frame_axes L="0.14" r="0.003"/>
+    <xacro:simple_inertial m="0.2" i="0.0005"/>
+  </link>
+
+  <!-- 由 DH 表自動產生 joint_1 ~ joint_6 -->
+  <xacro:dh_chain idx="1"/>
+
+  <!-- ====================== ros2_control（Gazebo 用） ====================== -->
+  <xacro:if value="$(arg use_gazebo)">
+    <ros2_control name="GazeboSimSystem" type="system">
+      <hardware>
+        <!-- 已查證：Humble + Fortress 的 ros-humble-gz-ros2-control 0.7.x 提供此 plugin -->
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </hardware>
+      <xacro:macro name="ctrl_joint" params="idx">
+        <xacro:property name="lim" value="${limits['joint_' + str(idx)]}"/>
+        <joint name="joint_${idx}">
+          <command_interface name="position">
+            <param name="min">${radians(lim[0])}</param>
+            <param name="max">${radians(lim[1])}</param>
+          </command_interface>
+          <state_interface name="position">
+            <param name="initial_value">0.0</param>
+          </state_interface>
+          <state_interface name="velocity"/>
+        </joint>
+      </xacro:macro>
+      <xacro:ctrl_joint idx="1"/>
+      <xacro:ctrl_joint idx="2"/>
+      <xacro:ctrl_joint idx="3"/>
+      <xacro:ctrl_joint idx="4"/>
+      <xacro:ctrl_joint idx="5"/>
+      <xacro:ctrl_joint idx="6"/>
+    </ros2_control>
+
+    <gazebo>
+      <plugin filename="libgz_ros2_control-system.so"
+              name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(arg controllers_file)</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+</robot>

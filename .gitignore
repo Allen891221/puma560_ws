@@ -1,0 +1,9 @@
+# colcon 產生的目錄
+build/
+install/
+log/
+
+# Python 快取
+__pycache__/
+*.pyc
+.pytest_cache/

@@ -1,0 +1,31 @@
+# =====================================================================
+# PUMA560 DH 參數（Craig《Introduction to Robotics》修正式 DH, modified DH）
+#
+#   ^{i-1}_i T = RotX(α_{i-1}) · TransX(a_{i-1}) · RotZ(θ_i) · TransZ(d_i)
+#
+# 這是整個專案「唯一」的一份 DH 參數：
+#   - URDF（puma560.urdf.xacro）用 xacro.load_yaml() 讀它產生 joint
+#   - GUI / 運動學模組（puma560_kinematics.py）也讀它
+# 修改這裡，兩邊會同時改變，不會不一致。
+#
+# 單位：長度 = 公尺 (m)，角度 = 度 (deg)
+# =====================================================================
+
+# 符號參數（GUI 的 DH 表用來顯示 a2、a3、d3、d4 等符號名稱）
+symbols:
+  a2: 0.4318
+  a3: 0.02032
+  d3: 0.14909
+  d4: 0.43307
+
+# DH 表：每一列對應 joint_i（i = 1..6）
+#   alpha_deg = α_{i-1}，a = a_{i-1}，d = d_i
+#   a / d 可以寫數字，或寫上面 symbols 裡的名稱（字串），讀取時會代換成數值
+#   θ_i 為關節變數，不列在表中
+dh_table:
+  - {i: 1, alpha_deg:   0.0, a: 0.0, d: 0.0}
+  - {i: 2, alpha_deg: -90.0, a: 0.0, d: 0.0}
+  - {i: 3, alpha_deg:   0.0, a: a2,  d: d3}
+  - {i: 4, alpha_deg: -90.0, a: a3,  d: d4}
+  - {i: 5, alpha_deg:  90.0, a: 0.0, d: 0.0}
+  - {i: 6, alpha_deg: -90.0, a: 0.0, d: 0.0}
