@@ -287,3 +287,11 @@ u   = c1·px + s1·py
 
 **Q6. pytest 出現 `ModuleNotFoundError: No module named '_pytest.scope'`**
 - 這是 `~/.local` 中新版 `anyio` 的 pytest 外掛造成的，加上 `-p no:anyio` 即可。
+
+---
+
+## 授權
+
+本專案採用 [Apache License 2.0](LICENSE) 授權（與各套件 `package.xml` 中的宣告一致）。
+
+DH 參數、公式與練習題數值引自 John J. Craig《Introduction to Robotics: Mechanics and Control》4th ed. 及課程講義，僅供教學使用。
