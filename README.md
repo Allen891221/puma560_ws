@@ -15,6 +15,7 @@
 ▶ [觀看完整影片（MP4，1920×720，55 秒）](docs/demo.mp4)
 
 影片內容：拖曳拉桿 → 練習題姿態（⁰₆T 與講義答案一致）→ 切換 ¹₃T、³₆T → 奇異姿態提示 → TCP → 反向運動學 8 組解逐一套用 → 歸零。
+影片與截圖都是用 [`tools/record_demo/record_demo.sh`](tools/record_demo/) 自動錄製的，GUI 或外觀改版後可以一個指令重錄。
 
 ### 截圖
 
@@ -252,6 +253,10 @@ u   = c1·px + s1·py
     ├── puma560_teaching_gui/puma560_kinematics.py   ← 純 Python（不依賴 ROS），FK + IK
     ├── puma560_teaching_gui/gui_node.py
     └── test/test_kinematics.py、test/test_ik.py
+
+~/puma560_ws/
+├── docs/                       # 示範影片、README 截圖
+└── tools/record_demo/          # 錄製示範影片的工具（見該目錄的 README）
 ```
 
 ---
