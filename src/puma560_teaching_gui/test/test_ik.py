@@ -105,3 +105,25 @@ def test_fit_to_limits():
     assert math.degrees(out[1]) == pytest.approx(-190)
     assert math.degrees(out[2]) == pytest.approx(190)
     assert fit_to_limits(deg2rad_list([170, 0, 0, 0, 0, 0]), lim) is None
+
+
+def test_rounded_matrix_input(robot):
+    """手打 4 位小數的 ⁰₆T：修正 R 後反解，原關節角仍在解之中（容許捨入誤差）。"""
+    from puma560_teaching_gui.puma560_kinematics import nearest_rotation, rotation_deviation
+    q = deg2rad_list([60, -30, 30, 40, 45, -20])
+    T = robot.fk(q)
+    T_in = np.round(T, 4)
+    orth, det = rotation_deviation(T_in[:3, :3])
+    assert orth > 1e-12 and det > 0
+    T_fix = T_in.copy()
+    T_fix[:3, :3] = nearest_rotation(T_in[:3, :3])
+    assert rotation_deviation(T_fix[:3, :3])[0] < 1e-12
+    res = robot.ik(T_fix)
+    assert len(res.solutions) == 8
+    assert any(same_configuration(s.q, q, 1e-3) for s in res.solutions)
+
+
+def test_nearest_rotation_fixes_reflection():
+    from puma560_teaching_gui.puma560_kinematics import nearest_rotation
+    R = nearest_rotation(np.diag([1.0, 1.0, -1.0]))
+    assert np.linalg.det(R) == pytest.approx(1.0)

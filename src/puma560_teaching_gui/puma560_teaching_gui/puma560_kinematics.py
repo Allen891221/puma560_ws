@@ -330,6 +330,23 @@ def fk_error(T_a: np.ndarray, T_b: np.ndarray):
             float(np.max(np.abs(T_a[:3, :3] - T_b[:3, :3]))))
 
 
+def rotation_deviation(R: np.ndarray):
+    """回傳 (max|RᵀR − I|, det R)，用來判斷手打的 R 是不是旋轉矩陣。"""
+    R = np.asarray(R, dtype=float)
+    return float(np.max(np.abs(R.T @ R - np.eye(3)))), float(np.linalg.det(R))
+
+
+def nearest_rotation(R: np.ndarray) -> np.ndarray:
+    """用 SVD 求最接近 R 的旋轉矩陣（R = UΣVᵀ → UVᵀ，並保證 det = +1）。
+
+    從講義或計算機抄來的 ⁰₆T 通常只有 4 位小數，RᵀR 不會剛好等於 I，
+    先投影回旋轉矩陣再反解，θ4～θ6 才不會被捨入誤差帶偏。
+    """
+    U, _, Vt = np.linalg.svd(np.asarray(R, dtype=float))
+    D = np.diag([1.0, 1.0, np.sign(np.linalg.det(U @ Vt))])
+    return U @ D @ Vt
+
+
 def same_configuration(q_a: Sequence[float], q_b: Sequence[float], tol: float = 1e-6) -> bool:
     """兩組關節角是否相同（以 2π 為週期比較）。"""
     return all(abs(wrap_angle(a - b)) < tol for a, b in zip(q_a, q_b))

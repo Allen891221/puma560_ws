@@ -109,7 +109,7 @@ def generate_launch_description():
         DeclareLaunchArgument('gui', default_value='true', description='是否開啟教學 GUI'),
         DeclareLaunchArgument('show_axes', default_value='true', description='是否畫出各 link 座標軸'),
         DeclareLaunchArgument('joint_limits', default_value='default',
-                              description='default（±180°）或 real（僅供參考）'),
+                              choices=['default','real'], description='default（±180°）或 real（僅供參考）'),
         DeclareLaunchArgument('software_rendering', default_value='false',
                               description='true：設定 LIBGL_ALWAYS_SOFTWARE=1（VM / 無 GPU）'),
         DeclareLaunchArgument('render_engine', default_value='ogre2',

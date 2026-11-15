@@ -11,10 +11,11 @@ PUMA560 正向運動學教學 GUI（PyQt5 + rclpy）
   5. 預設姿態按鈕
   6. 驗證區：tf2 查詢 link_0 → link_6，與 DH 公式比較
   7. 工具中心點 TCP、θ5 奇異點提示
-  8. 反向運動學面板：以目前 ⁰₆T 反解全部 8 組解，點選即套用
+  8. 反向運動學面板：以目前 ⁰₆T 或「手動輸入的 ⁰₆T」反解全部 8 組解，點選即套用
 """
 import math
 import os
+import re
 import sys
 from collections import deque
 
@@ -30,13 +31,16 @@ from tf2_ros import Buffer, TransformListener
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from puma560_teaching_gui.puma560_kinematics import (
-    Puma560, fit_to_limits, load_dh_params, same_configuration)
+    Puma560, fit_to_limits, load_dh_params, nearest_rotation, rotation_deviation,
+    same_configuration)
 
 JOINT_NAMES = ['joint_%d' % i for i in range(1, 7)]
 SUP = '⁰¹²³⁴⁵⁶'
 SUB = '₀₁₂₃₄₅₆'
 POS_TOL_MM = 0.01      # 驗證門檻：位置誤差 < 0.01 mm
 ROT_TOL = 1e-5         # 旋轉矩陣元素誤差門檻
+ORTH_FIX_TOL = 1e-9   # 輸入的 R：max|RᵀR − I| 超過此值就用 SVD 修正
+ORTH_REJECT_TOL = 0.05  # 超過此值視為不是旋轉矩陣（多半是打錯）
 
 PRESETS = [
     ('全零姿態', [0, 0, 0, 0, 0, 0]),
@@ -298,7 +302,7 @@ class TeachingWindow(QtWidgets.QWidget):
         return box
 
     def _build_ik(self):
-        """反向運動學面板：以目前 ⁰₆T 反解 8 組解，點選任一列即套用到拉桿。"""
+        """反向運動學面板：以目前 ⁰₆T 或手動輸入的 ⁰₆T 反解 8 組解，點選任一列即套用到拉桿。"""
         self.ik_result = None
         box = QtWidgets.QWidget()
         v = QtWidgets.QVBoxLayout(box)
@@ -307,10 +311,21 @@ class TeachingWindow(QtWidgets.QWidget):
         btn.setStyleSheet('font-weight: bold; padding: 4px 12px;')
         btn.clicked.connect(self.solve_ik)
         top.addWidget(btn)
+        self.ik_in_toggle = QtWidgets.QPushButton('手動輸入 ⁰₆T ▸')
+        self.ik_in_toggle.setCheckable(True)
+        self.ik_in_toggle.setToolTip('展開輸入區：自行輸入（或貼上）⁰₆T 的數值來反解 θ1～θ6')
+        top.addWidget(self.ik_in_toggle)
         self.ik_target_lab = QtWidgets.QLabel('尚未反解')
         self.ik_target_lab.setFont(MONO)
+        # 目標座標可能很長，不要讓它把分頁撐寬
+        self.ik_target_lab.setSizePolicy(QtWidgets.QSizePolicy.Ignored,
+                                         QtWidgets.QSizePolicy.Preferred)
         top.addWidget(self.ik_target_lab, 1)
         v.addLayout(top)
+        self.ik_in_box = self._build_ik_input()
+        self.ik_in_box.setVisible(False)
+        self.ik_in_toggle.toggled.connect(self._on_ik_in_toggle)
+        v.addWidget(self.ik_in_box)
 
         self.ik_msg_lab = QtWidgets.QLabel('')
         self.ik_msg_lab.setWordWrap(True)
@@ -351,19 +366,169 @@ class TeachingWindow(QtWidgets.QWidget):
         note.setWordWrap(True)
         note.setStyleSheet('color: gray;')
         v.addWidget(note)
+        # 輸入區＋8 組解比較高，螢幕不夠高時改用捲動，避免元件互相重疊
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(box)
+        return scroll
+
+    def _build_ik_input(self):
+        """手動輸入 ⁰₆T 的表格（上 3 列可編輯，最後一列固定 0 0 0 1）。"""
+        box = QtWidgets.QGroupBox('輸入 ⁰₆T（位置單位跟隨右側的 mm / m 設定）')
+        h = QtWidgets.QHBoxLayout(box)
+        f = QtGui.QFont(MONO)
+        f.setPointSize(10)
+        t = QtWidgets.QTableWidget(4, 4)
+        t.setFont(f)
+        t.verticalHeader().setVisible(False)
+        t.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+        vh = t.verticalHeader()
+        vh.setSectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        vh.setDefaultSectionSize(22)
+        t.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        t.setFixedHeight(t.horizontalHeader().sizeHint().height() + 4 * 22 + 4)
+        for r in range(4):
+            for c in range(4):
+                it = QtWidgets.QTableWidgetItem('')
+                it.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                it.setForeground(TEXT)
+                it.setBackground(COLOR_LAST if r == 3 else (COLOR_P if c == 3 else COLOR_R))
+                if r == 3:
+                    it.setText('1' if c == 3 else '0')
+                    it.setFlags(it.flags() & ~QtCore.Qt.ItemIsEditable)
+                t.setItem(r, c, it)
+        self.ik_in = t
+        self._set_ik_input_headers()
+        h.addWidget(t, 1)
+
+        btns = QtWidgets.QVBoxLayout()
+        b1 = QtWidgets.QPushButton('填入目前 ⁰₆T')
+        b1.setToolTip('把拉桿目前姿態的 ⁰₆T 填進來（內部保留完整精度；改過的格子以你輸入的值為準）')
+        b1.clicked.connect(self.fill_ik_input_from_current)
+        b2 = QtWidgets.QPushButton('從剪貼簿貼上')
+        b2.setToolTip('貼上 12 個（前 3 列）或 16 個數字，依列優先排列；\n'
+                      '空白、逗號、分號、方括號都可以，例如 MATLAB / numpy 印出的矩陣')
+        b2.clicked.connect(self.paste_ik_input)
+        b3 = QtWidgets.QPushButton('以輸入的 ⁰₆T 反解')
+        b3.setStyleSheet('font-weight: bold;')
+        b3.clicked.connect(self.solve_ik_input)
+        btns.addWidget(b1)
+        btns.addWidget(b2)
+        btns.addStretch(1)
+        btns.addWidget(b3)
+        h.addLayout(btns)
+        self.fill_ik_input_from_current()
         return box
+
+    def _set_ik_input_headers(self):
+        unit = 'mm' if self.unit_mm else 'm'
+        self.ik_in.setHorizontalHeaderLabels(['X̂6', 'Ŷ6', 'Ẑ6', '⁰P₆ORG (%s)' % unit])
+
+    def _on_ik_in_toggle(self, on):
+        self.ik_in_box.setVisible(on)
+        self.ik_in_toggle.setText('手動輸入 ⁰₆T ' + ('▾' if on else '▸'))
+
+    def _ik_cell_fmt(self, c):
+        return '%.6f' if c < 3 else ('%.4f' if self.unit_mm else '%.7f')
+
+    def _set_ik_cell(self, r, c, v):
+        """顯示固定位數，完整精度的值存在 UserRole；之後文字沒被改動就用完整值。"""
+        v = float(v)
+        txt = self._ik_cell_fmt(c) % v
+        if float(txt) == 0.0:
+            txt = txt.lstrip('-')     # 避免顯示 -0.000000
+        it = self.ik_in.item(r, c)
+        it.setText(txt)
+        it.setData(QtCore.Qt.UserRole, (txt, v))
+
+    def _ik_cell_value(self, r, c):
+        it = self.ik_in.item(r, c)
+        txt = it.text().strip()
+        stored = it.data(QtCore.Qt.UserRole)
+        if stored is not None and stored[0] == txt:
+            return stored[1]
+        return float(txt.replace('−', '-'))
+
+    def _write_ik_input(self, T, scale):
+        """T 的位置單位為 m；scale = 1000 時以 mm 顯示。"""
+        for r in range(3):
+            for c in range(4):
+                self._set_ik_cell(r, c, T[r, c] * (scale if c == 3 else 1.0))
+
+    def fill_ik_input_from_current(self):
+        self._write_ik_input(self.robot.fk(self.q_rad()), 1000.0 if self.unit_mm else 1.0)
+
+    def paste_ik_input(self):
+        text = QtWidgets.QApplication.clipboard().text()
+        nums = re.findall(r'[-+−]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?', text)
+        if len(nums) not in (12, 16):
+            self._ik_error('剪貼簿裡找到 %d 個數字，需要 12 個（前 3 列）或 16 個（完整 4×4）。' % len(nums))
+            return
+        for k in range(12):
+            it = self.ik_in.item(k // 4, k % 4)
+            it.setData(QtCore.Qt.UserRole, None)
+            it.setText(nums[k].replace('−', '-'))
+        self.ik_msg_lab.setText('已貼上，按「以輸入的 ⁰₆T 反解」開始計算。')
+        self.ik_msg_lab.setStyleSheet('color: #1e6e2e;')
+
+    def _read_ik_input(self):
+        """讀取輸入表格，回傳位置單位為 m 的 4×4 矩陣；有格子無法解析時丟 ValueError。"""
+        scale = 1000.0 if self.unit_mm else 1.0
+        T = np.eye(4)
+        for r in range(3):
+            for c in range(4):
+                try:
+                    v = self._ik_cell_value(r, c)
+                except ValueError:
+                    raise ValueError('第 %d 列第 %d 欄「%s」不是數字'
+                                     % (r + 1, c + 1, self.ik_in.item(r, c).text()))
+                T[r, c] = v / scale if c == 3 else v
+        return T
+
+    def _ik_error(self, msg):
+        self.ik_msg_lab.setText(msg)
+        self.ik_msg_lab.setStyleSheet('color: #b00000;')
 
     def solve_ik(self):
         """用目前拉桿角度的 ⁰₆T 反解（手腕奇異時 θ4 取目前值）。"""
         q = self.q_rad()
-        T = self.robot.fk(q)
-        self.ik_result = self.robot.ik(T, q_ref=q)
+        self._run_ik(self.robot.fk(q), q, [])
+
+    def solve_ik_input(self):
+        """用輸入表格中的 ⁰₆T 反解。R 不完全正交時先用 SVD 修正。"""
+        try:
+            T_in = self._read_ik_input()
+        except ValueError as e:
+            self._ik_error('輸入有誤：%s' % e)
+            return
+        orth, det = rotation_deviation(T_in[:3, :3])
+        if det < 0 or orth > ORTH_REJECT_TOL:
+            self._ik_error('輸入的 3×3 部分不是旋轉矩陣（max|RᵀR − I| = %.3g，det R = %.4f），'
+                           '請檢查是否打錯或欄列顛倒。' % (orth, det))
+            return
+        T = T_in.copy()
+        notes = []
+        if orth > ORTH_FIX_TOL:
+            T[:3, :3] = nearest_rotation(T_in[:3, :3])
+            notes.append('輸入的 R 不完全正交（max|RᵀR − I| = %.1e，常見於只抄 4 位小數），'
+                         '已用 SVD 換成最接近的旋轉矩陣再反解（各元素最多改動 %.1e）。'
+                         % (orth, float(np.max(np.abs(T[:3, :3] - T_in[:3, :3])))))
+        self._run_ik(T, self.q_rad(), notes)
+
+    def _run_ik(self, T, q_ref, notes):
+        self.ik_result = self.robot.ik(T, q_ref=q_ref)
         res = self.ik_result
-        msgs = list(res.messages)
+        msgs = notes + list(res.messages)
         if res.reachable:
             worst = max(s.max_error for s in res.solutions)
             msgs.insert(0, '共 %d 組解，全部代回 FK 驗算，最大誤差 %.1e（位置單位 m）'
                         % (len(res.solutions), worst))
+            if not any(s.singular for s in res.solutions) and \
+                    min(abs(math.sin(s.q[4])) for s in res.solutions) < 1e-3:
+                msgs.append('θ5 非常接近 0（接近手腕奇異）：θ4、θ6 對輸入的微小誤差非常敏感，'
+                            '只有 θ4 + θ6 比較可靠。')
         self.ik_msg_lab.setText('\n'.join(msgs))
         self.ik_msg_lab.setStyleSheet('color: #b00000;' if any('奇異' in m or '無解' in m for m in msgs)
                                       else 'color: #1e6e2e;')
@@ -527,7 +692,22 @@ class TeachingWindow(QtWidgets.QWidget):
         self.update_all(publish=False)
 
     def _on_unit(self, idx):
-        self.unit_mm = (idx == 0)
+        unit_mm = (idx == 0)
+        if unit_mm != self.unit_mm:
+            # 輸入表格的位置欄跟著換算（無法解析的格子保留原文字）
+            k = 1000.0 if unit_mm else 0.001
+            vals = []
+            for r in range(3):
+                try:
+                    vals.append(self._ik_cell_value(r, 3) * k)
+                except ValueError:
+                    vals.append(None)
+            self.unit_mm = unit_mm
+            for r, val in enumerate(vals):
+                if val is not None:
+                    self._set_ik_cell(r, 3, val)
+        self.unit_mm = unit_mm
+        self._set_ik_input_headers()
         self.update_all(publish=False)
 
     def set_q(self, q_deg):
@@ -549,6 +729,7 @@ class TeachingWindow(QtWidgets.QWidget):
         self.ik_result = None
         self.ik_target_lab.setText('尚未反解')
         self.ik_msg_lab.setText('')
+        self.fill_ik_input_from_current()
         for r in range(8):
             for c in range(9):
                 self.ik_table.item(r, c).setText('')
